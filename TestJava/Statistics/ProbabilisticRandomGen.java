@@ -1,4 +1,5 @@
 package Statistics;
-interface ProbabilisticRandomGen {
-    int generateNumber();
+
+public interface ProbabilisticRandomGen {
+    int nextFromSample();
 }

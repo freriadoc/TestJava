@@ -1,5 +1,5 @@
 package Statistics;
-class NumAndProbability {
+public class NumAndProbability {
     private final int num;
     private final double probability;
 

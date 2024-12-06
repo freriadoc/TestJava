@@ -5,12 +5,14 @@ import java.util.Random;
 import java.util.stream.Collectors;
 
 
-class ProbabilisticRandomGenImpl implements ProbabilisticRandomGen {
+public class ProbabilisticRandomGenImpl implements ProbabilisticRandomGen {
 
-    private final List<NumAndProbability> numAndProbabilities;
-    private final Random random;
+    private List<NumAndProbability> numAndProbabilities;
+    private Random random;
 
-    public ProbabilisticRandomGenImpl(List<NumAndProbability> numAndProbabilities) {
+    public ProbabilisticRandomGenImpl() {
+    }
+    public void initialize(List<NumAndProbability> numAndProbabilities) {
         this.numAndProbabilities = normalizeProbabilities(numAndProbabilities);
         this.random = new Random();
     }
