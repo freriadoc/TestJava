@@ -2,6 +2,7 @@ package Statistics;
 
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,9 +45,17 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
     private List<Measurement> getSnapshot() {
         long currentTime = System.currentTimeMillis();
 
-        // Clean up old measurements from the original deque
-        measurements.removeIf(measurement -> currentTime - measurement.timestamp >= 1000);
+        Iterator<Measurement> iterator = measurements.iterator();
 
+        // Clean up old measurements from the original deque
+        while (iterator.hasNext()) {
+            Measurement measurement = iterator.next();
+            if (currentTime - measurement.timestamp >= 1000) {
+                iterator.remove(); // Remove the old measurement
+            } else {
+                break; // Stop iterating when we find a measurement that is not too old
+            }
+        }
         // Create a snapshot of the current measurements after cleanup
         return new ArrayList<>(measurements);
     }
