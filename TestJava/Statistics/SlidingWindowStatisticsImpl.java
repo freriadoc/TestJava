@@ -8,12 +8,12 @@ import java.util.function.Predicate;
 
 public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
     private final EventBus eventBus; // Use the EventBus interface
-    private final List<Measurement> measurements; // Use a regular List<Measurement>
+    private final Deque<Measurement> measurements; // Use a Deque<Measurement>
     private final ThrottlerImpl throttler;
 
     public SlidingWindowStatisticsImpl(int maxMeasurementsPerSecond) {
         this.eventBus = new EventBusImpl(); // Initialize with EventBusImpl
-        this.measurements = new ArrayList<>(); // Use a regular ArrayList
+        this.measurements = new ArrayDeque<>(); // Use an ArrayDeque
         this.throttler = new ThrottlerImpl(maxMeasurementsPerSecond);
     }
 
@@ -27,7 +27,7 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
                 // Add the new measurement with the current timestamp
                 measurements.add(new Measurement(measurement, currentTime));
                 cleanupOldMeasurements(currentTime);
-                histogram =  getCurrentHistogram();
+                histogram = getCurrentHistogram();
             }
 
             // Publish the updated statistics
@@ -36,29 +36,25 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
     }
 
     private void cleanupOldMeasurements(long currentTime) {
-        // Use binary search to find the first measurement older than one second
-        Measurement key = new Measurement(0, currentTime - 1000); // Create a key with a timestamp of one second ago
-        int index = Collections.binarySearch(measurements, key,
-                (m1, m2) -> Long.compare(m1.timestamp, m2.timestamp));
-
-        // If the index is negative, it indicates the insertion point
-        if (index < 0) {
-            index = -(index + 1); // Convert to the insertion point
-        }
-
-        // Remove all elements from index onward
-        if (index < measurements.size()) {
-            measurements.subList(index, measurements.size()).clear(); // Remove all old measurements
+        Iterator<Measurement> iterator = measurements.iterator();
+        while (iterator.hasNext()) {
+            Measurement measurement = iterator.next();
+            if (currentTime - measurement.timestamp > 1000) {
+                iterator.remove(); // Remove the measurement if it's older than one second
+            } else {
+                // Since the measurements are sorted by timestamp, we can break early
+                break;
+            }
         }
     }
 
     private @NotNull HashMap<Integer, Integer> getCurrentHistogram() {
-            HashMap<Integer, Integer> histogram = new HashMap<>();
-            for (Measurement measurement : measurements) {
-                // Update the histogram with the current measurement
-                histogram.merge(measurement.value, 1, Integer::sum);
-            }
-            return histogram;
+        HashMap<Integer, Integer> histogram = new HashMap<>();
+        for (Measurement measurement : measurements) {
+            // Update the histogram with the current measurement
+            histogram.merge(measurement.value, 1, Integer::sum);
+        }
+        return histogram;
     }
 
     @Override
@@ -106,7 +102,6 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
             }
             return count == 0 ? 0 : sum / count;
         }
-
 
         @Override
         public int getMode() {
