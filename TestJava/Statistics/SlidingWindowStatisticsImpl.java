@@ -2,23 +2,18 @@ package Statistics;
 
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
-import java.util.ArrayList;
 
 public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
     private final EventBus eventBus; // Use the EventBus interface
-    private final ConcurrentLinkedDeque<Measurement> measurements;
+    private final List<Measurement> measurements; // Use a regular List<Measurement>
     private final ThrottlerImpl throttler;
 
     public SlidingWindowStatisticsImpl(int maxMeasurementsPerSecond) {
         this.eventBus = new EventBusImpl(); // Initialize with EventBusImpl
-        this.measurements = new ConcurrentLinkedDeque<>();
+        this.measurements = new ArrayList<>(); // Use a regular ArrayList
         this.throttler = new ThrottlerImpl(maxMeasurementsPerSecond);
     }
 
@@ -27,51 +22,43 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
         if (throttler.shouldProceed() == ThrottleResult.PROCEED) {
             long currentTime = System.currentTimeMillis();
 
-            List<Measurement> snapshot;
+            HashMap<Integer, Integer> histogram;
             synchronized (measurements) {
                 // Add the new measurement with the current timestamp
                 measurements.add(new Measurement(measurement, currentTime));
-
-                // Clean old measurements and get a snapshot of measures.
-                snapshot = getSnapshot();
+                cleanupOldMeasurements(currentTime);
+                histogram =  getCurrentHistogram();
             }
-            ConcurrentHashMap<Integer, Integer> histogram = getCurrentHistogramFromSnapshot(snapshot);
 
             // Publish the updated statistics
             eventBus.publishEvent(new StatisticsImpl(histogram)); // Ensure StatisticsImpl extends BaseEvent
         }
     }
 
-    private List<Measurement> getSnapshot() {
-        long currentTime = System.currentTimeMillis();
+    private void cleanupOldMeasurements(long currentTime) {
+        // Use binary search to find the first measurement older than one second
+        Measurement key = new Measurement(0, currentTime - 1000); // Create a key with a timestamp of one second ago
+        int index = Collections.binarySearch(measurements, key,
+                (m1, m2) -> Long.compare(m1.timestamp, m2.timestamp));
 
-        Iterator<Measurement> iterator = measurements.iterator();
+        // If the index is negative, it indicates the insertion point
+        if (index < 0) {
+            index = -(index + 1); // Convert to the insertion point
+        }
 
-        // Clean up old measurements from the original deque
-        while (iterator.hasNext()) {
-            Measurement measurement = iterator.next();
-            if (currentTime - measurement.timestamp >= 1000) {
-                iterator.remove(); // Remove the old measurement
-            } else {
-                break; // Stop iterating when we find a measurement that is not too old
+        // Remove all elements from index onward
+        if (index < measurements.size()) {
+            measurements.subList(index, measurements.size()).clear(); // Remove all old measurements
+        }
+    }
+
+    private @NotNull HashMap<Integer, Integer> getCurrentHistogram() {
+            HashMap<Integer, Integer> histogram = new HashMap<>();
+            for (Measurement measurement : measurements) {
+                // Update the histogram with the current measurement
+                histogram.merge(measurement.value, 1, Integer::sum);
             }
-        }
-        // Create a snapshot of the current measurements after cleanup
-        return new ArrayList<>(measurements);
-    }
-
-    private @NotNull ConcurrentHashMap<Integer, Integer> getCurrentHistogramFromSnapshot(@NotNull List<Measurement> snapshot) {
-        ConcurrentHashMap<Integer, Integer> histogram = new ConcurrentHashMap<>();
-        for (Measurement measurement : snapshot) {
-            // Update the histogram with the current measurement
-            histogram.merge(measurement.value, 1, Integer::sum);
-        }
-        return histogram;
-    }
-
-    private @NotNull ConcurrentHashMap<Integer, Integer> getCurrentHistogram() {
-        List<Measurement> snapshot = getSnapshot();
-        return getCurrentHistogramFromSnapshot(snapshot);
+            return histogram;
     }
 
     @Override
@@ -92,17 +79,20 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
 
     @Override
     public Statistics getLatestStatistics() {
-        return new StatisticsImpl(getCurrentHistogram());
+        HashMap<Integer, Integer> histogram;
+        synchronized (measurements) {
+            histogram = getCurrentHistogram();
+        }
+        return new StatisticsImpl(histogram);
     }
 
     private record Measurement(int value, long timestamp) {
-
     }
 
     public static class StatisticsImpl implements Statistics, BaseEvent { // Extend BaseEvent
-        private final ConcurrentHashMap<Integer, Integer> histogram;
+        private final HashMap<Integer, Integer> histogram;
 
-        public StatisticsImpl(ConcurrentHashMap<Integer, Integer> histogram) {
+        public StatisticsImpl(HashMap<Integer, Integer> histogram) {
             this.histogram = histogram;
         }
 
@@ -110,12 +100,13 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
         public double getMean() {
             double sum = 0;
             int count = 0;
-            for (Integer measurement : histogram.keySet()) {
-                sum += measurement * histogram.get(measurement);
-                count += histogram.get(measurement);
+            for (Map.Entry<Integer, Integer> entry : histogram.entrySet()) {
+                sum += entry.getKey() * entry.getValue();
+                count += entry.getValue();
             }
             return count == 0 ? 0 : sum / count;
         }
+
 
         @Override
         public int getMode() {
@@ -129,7 +120,7 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
         public double getPctile(int pctile) {
             int[] measurements = histogram.keySet().stream().mapToInt(Integer::intValue).toArray();
             int index = (int) Math.ceil(pctile / 100.0 * measurements.length);
-            return measurements .length > 0 ? measurements[Math.min(index - 1, measurements.length - 1)] : 0;
+            return measurements.length > 0 ? measurements[Math.min(index - 1, measurements.length - 1)] : 0;
         }
     }
 }
