@@ -1,42 +1,38 @@
 package Statistics;
 
-import java.util.LinkedList;
 import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 public class ThrottlerImpl implements Throttler {
     private final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);
     private final int maxOperationsPerSecond;
+    private final long slidingWindowDuration; // Duration in milliseconds
     private final Queue<Long> operationTimestamps;
-    private final ReentrantLock lock = new ReentrantLock(); // Lock for thread safety
 
-    public ThrottlerImpl(int maxOperationsPerSecond) {
+    public ThrottlerImpl(int maxOperationsPerSecond, long slidingWindowDuration) {
         this.maxOperationsPerSecond = maxOperationsPerSecond;
-        this.operationTimestamps = new LinkedList<>();
+        this.slidingWindowDuration = slidingWindowDuration;
+        this.operationTimestamps = new ConcurrentLinkedQueue<>();
     }
 
     @Override
     public ThrottleResult shouldProceed() {
         long currentTime = System.currentTimeMillis();
-        lock.lock(); // Acquire the lock
-        try {
-            // Remove timestamps older than 1 second
-            while (!operationTimestamps.isEmpty() && (currentTime - operationTimestamps.peek() >= 1000)) {
-                operationTimestamps.poll();
-            }
 
-            if (operationTimestamps.size() < maxOperationsPerSecond) {
-                operationTimestamps.add(currentTime);
-                return ThrottleResult.PROCEED;
-            } else {
-                return ThrottleResult.DO_NOT_PROCEED;
-            }
-        } finally {
-            lock.unlock(); // Ensure the lock is released
+        // Remove timestamps older than the sliding window duration
+        while (!operationTimestamps.isEmpty() && (currentTime - operationTimestamps.peek() >= slidingWindowDuration)) {
+            operationTimestamps.poll();
+        }
+
+        if (operationTimestamps.size() < maxOperationsPerSecond) {
+            operationTimestamps.add(currentTime);
+            return ThrottleResult.PROCEED;
+        } else {
+            return ThrottleResult.DO_NOT_PROCEED;
         }
     }
 

@@ -21,7 +21,7 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
     public SlidingWindowStatisticsImpl(int maxMeasurementsPerSecond) {
         this.eventBus = new EventBusImpl(); // Initialize with EventBusImpl
         this.measurements = new LockFreeRingBuffer<>(1000); // Set a capacity for the ring buffer
-        this.throttler = new ThrottlerImpl(maxMeasurementsPerSecond);
+        this.throttler = new ThrottlerImpl(maxMeasurementsPerSecond,1000);
         this.scheduler = Executors.newScheduledThreadPool(1);
 
         // Schedule the task to run every 10 milliseconds

@@ -15,7 +15,7 @@ public class ThrottlerImplTest {
 
     @BeforeEach
     public void setUp() {
-        throttler = new ThrottlerImpl(5); // Allow 5 operations per second
+        throttler = new ThrottlerImpl(5,1000); // Allow 5 operations per second
     }
 
     @Test
