@@ -44,22 +44,23 @@ public class EventBusImpl implements EventBus {
 
     @Override
     public boolean publishEvent(BaseEvent event) {
-        // Add the event to the queue for processing
-        return eventQueue.offer(new Event<>(event));
-    }
-
-    @Override
-    public boolean publishCoalescedEvent(BaseEvent event) {
-        Queue<EventSubscriber<BaseEvent>> consumers = subscribers.get(event.getClass());
-        if (consumers != null) {
-            // Check if the event is different from the last published event
-            if (isDifferentEvent(event, latestEvents.get(event.getClass()))) {
-                latestEvents.put(event.getClass(), event); // Update the latest event
-                // Add the event to the queue for processing
-                return eventQueue.offer(new Event<>(event));
+        if ( event.isCoalescing())
+        {
+            Queue<EventSubscriber<BaseEvent>> consumers = subscribers.get(event.getClass());
+            if (consumers != null) {
+                // Check if the event is different from the last published event
+                if (isDifferentEvent(event, latestEvents.get(event.getClass()))) {
+                    latestEvents.put(event.getClass(), event); // Update the latest event
+                    // Add the event to the queue for processing
+                    return eventQueue.offer(new Event<>(event));
+                }
             }
+            return true;
         }
-        return true;
+        else {
+            // Add the event to the queue for processing
+            return eventQueue.offer(new Event<>(event));
+        }
     }
 
     private boolean isDifferentEvent(BaseEvent newEvent, BaseEvent lastEvent) {

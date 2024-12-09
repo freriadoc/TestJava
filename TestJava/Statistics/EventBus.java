@@ -30,14 +30,6 @@ public interface EventBus {
     boolean publishEvent(BaseEvent event);
 
     /**
-     * Publishes a coalesced event to all subscribers, ensuring that only unique events are processed.
-     *
-     * @param event the event to publish
-     */
-    boolean publishCoalescedEvent(BaseEvent event);
-
-
-    /**
      * Shuts down the event bus, stopping all event processing.
      */
     void shutdown();

@@ -1,7 +1,11 @@
 package StatisticsTest;
 
+import Statistics.EventBus;
+import Statistics.EventBusImpl;
 import Statistics.SlidingWindowStatistics;
 import Statistics.SlidingWindowStatisticsImpl;
+import Statistics.Throttler;
+import Statistics.ThrottlerImpl; // Assuming you have a ThrottlerImpl class
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,11 +24,13 @@ public class SlidingWindowStatisticsImplTest {
     private final int maxMeasurementsPerSecond = 100;
     private final int numberOfThreads = 10;
     private final int measurementsPerThread = 100;
-
+    private final int ringBufferCapacity = 1000; // Define a capacity for the ring buffer
 
     @BeforeEach
     public void setUp() {
-        statistics = new SlidingWindowStatisticsImpl(maxMeasurementsPerSecond);
+        EventBus eventBus = new EventBusImpl(); // Create an instance of EventBus
+        Throttler throttler = new ThrottlerImpl(maxMeasurementsPerSecond, 1000); // Create an instance of Throttler
+        statistics = new SlidingWindowStatisticsImpl(eventBus, throttler, ringBufferCapacity); // Inject dependencies
     }
 
     @AfterEach
