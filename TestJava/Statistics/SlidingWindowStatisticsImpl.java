@@ -2,8 +2,8 @@ package Statistics;
 
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -13,14 +13,14 @@ import java.util.function.Predicate;
 
 public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
     private final EventBus eventBus; // Use the EventBus interface
-    private final ConcurrentLinkedDeque<Measurement> measurements; // Use a Deque<Measurement>
+    private final LockFreeRingBuffer<Measurement> measurements; // Use LockFreeRingBuffer<Measurement>
     private final ThrottlerImpl throttler;
     private final ScheduledExecutorService scheduler;
-    private final AtomicBoolean hasNewMeasurements = new AtomicBoolean(false);// Flag to track new measurements
+    private final AtomicBoolean hasNewMeasurements = new AtomicBoolean(false); // Flag to track new measurements
 
     public SlidingWindowStatisticsImpl(int maxMeasurementsPerSecond) {
         this.eventBus = new EventBusImpl(); // Initialize with EventBusImpl
-        this.measurements = new ConcurrentLinkedDeque<>(); // Use an ArrayDeque
+        this.measurements = new LockFreeRingBuffer<>(1000); // Set a capacity for the ring buffer
         this.throttler = new ThrottlerImpl(maxMeasurementsPerSecond);
         this.scheduler = Executors.newScheduledThreadPool(1);
 
@@ -34,8 +34,9 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
             long currentTime = System.currentTimeMillis();
 
             // Add the new measurement with the current timestamp
-            measurements.add(new Measurement(measurement, currentTime));
-            hasNewMeasurements.set(true);
+            if (measurements.add(new Measurement(measurement, currentTime))) {
+                hasNewMeasurements.set(true);
+            }
         }
     }
 
@@ -52,22 +53,26 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
         }
     }
     private void cleanupOldMeasurements(long currentTime) {
-        Iterator<Measurement> iterator = measurements.iterator();
-        while (iterator.hasNext()) {
-            Measurement measurement = iterator.next();
-            if (currentTime - measurement.timestamp > 1000) {
-                iterator.remove(); // Remove the measurement if it's older than one second
+        // Use the iterator to go through the measurements
+        for (Measurement measurement : measurements) {
+            if (measurement != null && currentTime - measurement.timestamp > 1000) {
+                // If the measurement is older than 1 second, advance the tail
+                measurements.advanceTail();
             } else {
-                // Since the measurements are sorted by timestamp, we can break early
-                break;
+                break; // Stop if we find a valid measurement
             }
         }
     }
+
     private @NotNull HashMap<Integer, Integer> getCurrentHistogram() {
         HashMap<Integer, Integer> histogram = new HashMap<>();
+
+        // Use the iterator to go through the measurements
         for (Measurement measurement : measurements) {
-            // Update the histogram with the current measurement
-            histogram.merge(measurement.value, 1, Integer::sum);
+            if (measurement != null) { // Check for null to avoid NullPointerException
+                // Update the histogram with the current measurement
+                histogram.merge(measurement.value, 1, Integer::sum);
+            }
         }
         return histogram;
     }
@@ -112,37 +117,40 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
         }
     }
 
-    public static class StatisticsImpl implements Statistics, BaseEvent { // Extend BaseEvent
-        private final HashMap<Integer, Integer> histogram;
-
-        public StatisticsImpl(HashMap<Integer, Integer> histogram) {
-            this.histogram = histogram;
-        }
+    public record StatisticsImpl(
+            HashMap<Integer, Integer> histogram) implements Statistics, BaseEvent { // Extend BaseEvent
 
         @Override
-        public double getMean() {
-            double sum = 0;
-            int count = 0;
-            for (Map.Entry<Integer, Integer> entry : histogram.entrySet()) {
-                sum += entry.getKey() * entry.getValue();
-                count += entry.getValue();
+            public double getMean() {
+                double sum = 0;
+                int count = 0;
+                for (Map.Entry<Integer, Integer> entry : histogram.entrySet()) {
+                    sum += entry.getKey() * entry.getValue();
+                    count += entry.getValue();
+                }
+                return count == 0 ? 0 : sum / count;
             }
-            return count == 0 ? 0 : sum / count;
-        }
 
         @Override
         public int getMode() {
-            return histogram.entrySet().stream()
-                    .max(Map.Entry.comparingByValue())
-                    .map(Map.Entry::getKey)
-                    .orElse(0);
+            int mode = 0;
+            int maxCount = 0;
+
+            for (Map.Entry<Integer, Integer> entry : histogram.entrySet()) {
+                int count = entry.getValue();
+                if (count > maxCount) {
+                    maxCount = count;
+                    mode = entry.getKey();
+                }
+            }
+            return mode;
         }
 
-        @Override
-        public double getPctile(int pctile) {
-            int[] measurements = histogram.keySet().stream().mapToInt(Integer::intValue).toArray();
-            int index = (int) Math .ceil(pctile / 100.0 * measurements.length);
-            return measurements.length > 0 ? measurements[Math.min(index - 1, measurements.length - 1)] : 0;
+            @Override
+            public double getPctile(int pctile) {
+                int[] measurements = histogram.keySet().stream().mapToInt(Integer::intValue).toArray();
+                int index = (int) Math.ceil(pctile / 100.0 * measurements.length);
+                return measurements.length > 0 ? measurements[Math.min(index - 1, measurements.length - 1)] : 0;
+            }
         }
-    }
 }

@@ -3,20 +3,33 @@ package StatisticsTest;
 import Statistics.SlidingWindowStatistics;
 import Statistics.SlidingWindowStatisticsImpl;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 public class SlidingWindowStatisticsImplTest {
     private SlidingWindowStatisticsImpl statistics;
+    private final int maxMeasurementsPerSecond = 100;
+    private final int numberOfThreads = 10;
+    private final int measurementsPerThread = 100;
+
 
     @BeforeEach
     public void setUp() {
-        statistics = new SlidingWindowStatisticsImpl(5); // Allow 5 measurements per second
+        statistics = new SlidingWindowStatisticsImpl(maxMeasurementsPerSecond);
+    }
+
+    @AfterEach
+    public void tearDown() {
+        statistics.shutdown();
     }
 
     @Test
@@ -70,7 +83,7 @@ public class SlidingWindowStatisticsImplTest {
     public void testSubscribeForStatistics() throws InterruptedException {
         CountDownLatch latch = new CountDownLatch(1);
         statistics.subscribeForStatistics(
-                stats -> true, // No filter, subscribe to all
+                _ -> true, // No filter, subscribe to all
                 stats -> {
                     assertEquals(3.0, stats.getMean(), 0.01);
                     latch.countDown();
@@ -115,5 +128,36 @@ public class SlidingWindowStatisticsImplTest {
         assertEquals(3.0, stats.getMean(), 0.01);
         assertEquals(1, stats.getMode());
         assertEquals(5, stats.getPctile(100));
+    }
+
+    @Test
+    public void testConcurrentAdditions() throws InterruptedException {
+        CountDownLatch latch = new CountDownLatch(numberOfThreads);
+        try (ExecutorService executor = Executors.newFixedThreadPool(numberOfThreads)) {
+
+            // Create and start threads to add measurements
+            for (int i = 0; i < numberOfThreads; i++) {
+                final int threadId = i;
+                executor.submit(() -> {
+                    for (int j = 0; j < measurementsPerThread; j++) {
+                        statistics.add(threadId); // Each thread adds its thread ID as the measurement
+                    }
+                    latch.countDown(); // Signal that this thread is done
+                });
+            }
+
+            latch.await(); // Wait for all threads to finish
+            executor.shutdown();
+            executor.awaitTermination(1, TimeUnit.MINUTES); // Wait for the executor to finish
+        }
+
+        // Verify the statistics
+        SlidingWindowStatistics.Statistics latestStatistics = statistics.getLatestStatistics();
+        HashMap<Integer, Integer> histogram = latestStatistics.histogram();
+
+        // Check that the histogram contains the expected counts
+        for (int i = 0; i < numberOfThreads; i++) {
+            assertEquals(measurementsPerThread, histogram.getOrDefault(i, 0), "Count for measurement " + i + " should be " + measurementsPerThread);
+        }
     }
 }

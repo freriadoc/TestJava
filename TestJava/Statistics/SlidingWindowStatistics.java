@@ -1,5 +1,6 @@
 package Statistics;
 
+import java.util.HashMap;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -14,5 +15,6 @@ public interface SlidingWindowStatistics {
         double getMean();
         int getMode();
         double getPctile(int pctile);
+        HashMap<Integer, Integer> histogram();
     }
 }
