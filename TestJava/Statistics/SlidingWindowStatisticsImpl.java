@@ -3,18 +3,29 @@ package Statistics;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
     private final EventBus eventBus; // Use the EventBus interface
-    private final Deque<Measurement> measurements; // Use a Deque<Measurement>
+    private final ConcurrentLinkedDeque<Measurement> measurements; // Use a Deque<Measurement>
     private final ThrottlerImpl throttler;
+    private final ScheduledExecutorService scheduler;
+    private final AtomicBoolean hasNewMeasurements = new AtomicBoolean(false);// Flag to track new measurements
 
     public SlidingWindowStatisticsImpl(int maxMeasurementsPerSecond) {
         this.eventBus = new EventBusImpl(); // Initialize with EventBusImpl
-        this.measurements = new ArrayDeque<>(); // Use an ArrayDeque
+        this.measurements = new ConcurrentLinkedDeque<>(); // Use an ArrayDeque
         this.throttler = new ThrottlerImpl(maxMeasurementsPerSecond);
+        this.scheduler = Executors.newScheduledThreadPool(1);
+
+        // Schedule the task to run every 10 milliseconds
+        scheduler.scheduleAtFixedRate(this::publishStatistics, 0, 10, TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -22,19 +33,24 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
         if (throttler.shouldProceed() == ThrottleResult.PROCEED) {
             long currentTime = System.currentTimeMillis();
 
-            HashMap<Integer, Integer> histogram;
-            synchronized (measurements) {
-                // Add the new measurement with the current timestamp
-                measurements.add(new Measurement(measurement, currentTime));
-                cleanupOldMeasurements(currentTime);
-                histogram = getCurrentHistogram();
-            }
-
-            // Publish the updated statistics
-            eventBus.publishEvent(new StatisticsImpl(histogram)); // Ensure StatisticsImpl extends BaseEvent
+            // Add the new measurement with the current timestamp
+            measurements.add(new Measurement(measurement, currentTime));
+            hasNewMeasurements.set(true);
         }
     }
 
+    private void publishStatistics() {
+        if (hasNewMeasurements.get()) { // Only publish if there are new measurements
+            try {
+                // Publish the updated statistics
+                eventBus.publishEvent(getLatestStatistics());
+            } catch (Exception e) {
+                System.err.println("Error publishing statistics: " + e.getMessage());
+            } finally {
+                hasNewMeasurements.set(false);
+            }
+        }
+    }
     private void cleanupOldMeasurements(long currentTime) {
         Iterator<Measurement> iterator = measurements.iterator();
         while (iterator.hasNext()) {
@@ -47,7 +63,6 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
             }
         }
     }
-
     private @NotNull HashMap<Integer, Integer> getCurrentHistogram() {
         HashMap<Integer, Integer> histogram = new HashMap<>();
         for (Measurement measurement : measurements) {
@@ -75,14 +90,26 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
 
     @Override
     public Statistics getLatestStatistics() {
-        HashMap<Integer, Integer> histogram;
-        synchronized (measurements) {
-            histogram = getCurrentHistogram();
-        }
+        long currentTime = System.currentTimeMillis();
+        cleanupOldMeasurements(currentTime);
+        HashMap<Integer, Integer> histogram = getCurrentHistogram();
         return new StatisticsImpl(histogram);
     }
 
     private record Measurement(int value, long timestamp) {
+    }
+
+    public void shutdown() {
+        scheduler.shutdown(); // Stop accepting new tasks
+        try {
+            // Wait for existing tasks to terminate
+            if (!scheduler.awaitTermination(60, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow(); // Force shutdown if tasks did not terminate
+            }
+        } catch (InterruptedException e) {
+            scheduler.shutdownNow(); // Force shutdown if interrupted
+            Thread.currentThread().interrupt(); // Restore interrupted status
+        }
     }
 
     public static class StatisticsImpl implements Statistics, BaseEvent { // Extend BaseEvent
@@ -114,7 +141,7 @@ public class SlidingWindowStatisticsImpl implements SlidingWindowStatistics {
         @Override
         public double getPctile(int pctile) {
             int[] measurements = histogram.keySet().stream().mapToInt(Integer::intValue).toArray();
-            int index = (int) Math.ceil(pctile / 100.0 * measurements.length);
+            int index = (int) Math .ceil(pctile / 100.0 * measurements.length);
             return measurements.length > 0 ? measurements[Math.min(index - 1, measurements.length - 1)] : 0;
         }
     }
