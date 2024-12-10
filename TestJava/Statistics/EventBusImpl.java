@@ -2,13 +2,7 @@ package Statistics;
 
 import java.util.Objects;
 import java.util.Queue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.*;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -77,17 +71,25 @@ public class EventBusImpl implements EventBus {
                 BaseEvent baseEvent = event.getEvent(); // Get the event
                 Class<? extends BaseEvent> eventClass = baseEvent.getClass();
                 Queue<EventSubscriber<BaseEvent>> consumers = subscribers.get(eventClass);
+
                 if (consumers != null) {
-                    consumers.forEach(consumer -> executorService.submit(() -> {
-                        try {
-                            // Check if the event passes the filter (if any)
-                            if (consumer.test(baseEvent)) {
-                                consumer.subscriber.accept(baseEvent);
-                            }
-                        } catch (Exception e) {
-                            System.err.println("Error processing event: " + e.getMessage());
-                        }
-                    }));
+                    // Create a list of CompletableFutures for each consumer
+                    CompletableFuture[] futures = consumers.stream()
+                            .map(consumer -> CompletableFuture.runAsync(() -> {
+                                try {
+                                    // Check if the event passes the filter (if any)
+                                    if (consumer.test(baseEvent)) {
+                                        consumer.subscriber.accept(baseEvent);
+                                    }
+                                } catch (Exception e) {
+                                    System.err.println("Error processing event: " + e.getMessage());
+                                }
+                            }, executorService)) // Use the executor service for async execution
+                            .toArray(CompletableFuture[]::new);
+
+                    // Combine all futures and wait for them to complete
+                    CompletableFuture<Void> allOf = CompletableFuture.allOf(futures);
+                    allOf.join(); // Wait for all consumers to finish processing
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt(); // Restore interrupted status
